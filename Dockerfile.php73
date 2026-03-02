@@ -1,0 +1,112 @@
+FROM php:7.3-apache
+
+# ---------------------------------
+# Install system dependencies
+# ---------------------------------
+# ---------------------------------
+# Install system dependencies + Java 8 (Temurin)
+# ---------------------------------
+RUN apt-get update && apt-get install -y \
+    git \
+    unzip \
+    curl \
+    gnupg \
+    ca-certificates \
+    libpq-dev \
+    libzip-dev \
+    libpng-dev \
+    libjpeg-dev \
+    libfreetype6-dev \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Adoptium repo for Java 8
+RUN mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://packages.adoptium.net/artifactory/api/gpg/key/public | gpg --dearmor -o /etc/apt/keyrings/adoptium.gpg \
+    && echo "deb [signed-by=/etc/apt/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb bullseye main" > /etc/apt/sources.list.d/adoptium.list \
+    && apt-get update \
+    && apt-get install -y temurin-8-jre \
+    && rm -rf /var/lib/apt/lists/*
+
+# Enable Apache mod_rewrite
+RUN a2enmod rewrite headers env proxy proxy_http
+
+# ---------------------------------
+# PHP Extensions
+# ---------------------------------
+
+RUN docker-php-ext-configure gd \
+    --with-freetype-dir=/usr/include/ \
+    --with-jpeg-dir=/usr/include/ \
+    && docker-php-ext-install \
+    pdo \
+    pdo_mysql \
+    mysqli \
+    pgsql \
+    pdo_pgsql \
+    gd \
+    zip \
+    pcntl
+
+# Install APCu via PECL
+RUN pecl install apcu \
+    && docker-php-ext-enable apcu
+
+# ---------------------------------
+# Asegurar que Java 8 sea el default
+# ---------------------------------
+ENV JAVA_HOME=/usr/lib/jvm/temurin-8-jre-amd64
+ENV PATH="$JAVA_HOME/bin:$PATH"
+
+ENV PHP_JAVA_BRIDGE_TMP=/tmp
+
+RUN chmod 1777 /dev/shm
+
+# ---------------------------------
+# Install Composer 2
+# ---------------------------------
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
+# ---------------------------------
+# Install Node + Yarn 1.x
+# ---------------------------------
+RUN curl -fsSL https://deb.nodesource.com/setup_16.x | bash - \
+    && apt-get update && apt-get install -y nodejs \
+    && npm install -g yarn@1.22.19
+
+# ---------------------------------
+# Install YUI Compressor
+# ---------------------------------
+RUN mkdir -p /opt/yui \
+    && curl -L -o /opt/yui/yuicompressor.jar \
+       https://repo1.maven.org/maven2/com/yahoo/platform/yui/yuicompressor/2.4.8/yuicompressor-2.4.8.jar
+
+RUN echo '#!/bin/bash\njava -jar /opt/yui/yuicompressor.jar "$@"' > /usr/local/bin/yui-compressor \
+    && chmod +x /usr/local/bin/yui-compressor
+
+# ---------------------------------
+# Working directory
+# ---------------------------------
+WORKDIR /app
+
+RUN chown -R www-data:www-data /var/www/html
+
+# COPY ./toba.conf /etc/apache2/sites-available/gestion.conf
+# COPY ./php-jasper.ini /usr/local/etc/php/conf.d/99-jasper.ini
+
+# Esto no sirva la primera vez, porque aún no está instalado G3
+# RUN a2ensite gestion.conf \
+#     && a2dissite 000-default.conf
+
+RUN chown -R www-data:www-data /app
+
+EXPOSE 80
+
+CMD ["apache2-foreground"]
+
+# COPY start.sh /start.sh
+# RUN chmod +x /start.sh
+
+# EXPOSE 80 8081
+
+# CMD ["/start.sh"]
